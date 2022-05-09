@@ -39,6 +39,7 @@
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
+#include <builtin_interfaces/msg/time.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
 #include <diagnostic_updater/publisher.hpp>
@@ -462,6 +463,25 @@ class RosFilter : public rclcpp::Node {
       std::vector<bool>& updateVector, Eigen::VectorXd& measurement,
       Eigen::MatrixXd& measurementCovariance);
 
+  //! @brief Validates incoming measurement ordering and produces errors if
+  //! validation does not pass.
+  //! @param[in] topicName - The name of the topic over which this message was
+  //! received
+  //! @param[in] stamp - The timestamp associated with this message.
+  //! @return true if the measrement is newer than all known measurements.
+  //!
+  bool validateMeasurementOrdering(const std::string& topicName,
+                                   const builtin_interfaces::msg::Time& stamp);
+
+  //! @brief Validates incoming measurements are within a reasonable timeframe.
+  //! @param[in] topicName - The name of the topic over which this message was
+  //! received
+  //! @param[in] stamp - The timestamp associated with this message.
+  //! @return true if the measrement is newer than all known measurements.
+  //!
+  bool validateMeasurementTime(const std::string& topicName,
+                               const builtin_interfaces::msg::Time& stamp);
+
   //! @brief Whether or not we print diagnostic messages to the /diagnostics
   //! topic
   //!
@@ -507,8 +527,8 @@ class RosFilter : public rclcpp::Node {
   //! @brief Start the Filter disabled at startup
   //!
   //! If this is true, the filter reads parameters and prepares publishers and
-  //! subscribes but does not integrate new messages into the state vector. The
-  //! filter can be enabled later using a service.
+  //! subscribes but does not integrate new messages into the state vector.
+  //! The filter can be enabled later using a service.
   bool disabled_at_startup_;
 
   //! @brief Whether the filter is enabled or not. See disabledAtStartup_.
@@ -535,8 +555,8 @@ class RosFilter : public rclcpp::Node {
   //!
   double gravitational_acceleration_;
 
-  //! @brief The depth of the history we track for smoothing/delayed measurement
-  //! processing
+  //! @brief The depth of the history we track for smoothing/delayed
+  //! measurement processing
   //!
   //! This is the guaranteed minimum buffer size for which previous states and
   //! measurements are kept.
@@ -612,8 +632,8 @@ class RosFilter : public rclcpp::Node {
   //! @brief This object accumulates static diagnostics, e.g., diagnostics
   //! relating to the configuration parameters.
   //!
-  //! The values are treated as static and always reported (i.e., this object is
-  //! never cleared)
+  //! The values are treated as static and always reported (i.e., this object
+  //! is never cleared)
   //!
   std::map<std::string, std::string> static_diagnostics_;
 
@@ -636,8 +656,8 @@ class RosFilter : public rclcpp::Node {
   //! stores the initial measurements. Note that this is different from using
   //! differential mode, as in differential mode, pose data is converted to
   //! twist data, resulting in boundless error growth for the variables being
-  //! fused. With relative measurements, the vehicle will start with a 0 heading
-  //! and position, but the measurements are still fused absolutely.
+  //! fused. With relative measurements, the vehicle will start with a 0
+  //! heading and position, but the measurements are still fused absolutely.
   std::map<std::string, tf2::Transform> initial_measurements_;
 
   //! @brief If including acceleration for each IMU input, whether or not we
@@ -678,9 +698,9 @@ class RosFilter : public rclcpp::Node {
   //!
   std::map<std::string, Eigen::MatrixXd> previous_measurement_covariances_;
 
-  //! @brief By default, the filter predicts and corrects up to the time of the
-  //! latest measurement. If this is set to true, the filter does the same, but
-  //! then also predicts up to the current time step.
+  //! @brief By default, the filter predicts and corrects up to the time of
+  //! the latest measurement. If this is set to true, the filter does the
+  //! same, but then also predicts up to the current time step.
   //!
   bool predict_to_current_time_;
 

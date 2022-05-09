@@ -55,6 +55,7 @@
 namespace robot_localization {
 using namespace std::chrono_literals;
 
+// ===================================================================
 template <typename T>
 RosFilter<T>::RosFilter(const rclcpp::NodeOptions& options)
     : Node(options.arguments()[0], options),
@@ -102,6 +103,7 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions& options)
   state_variable_names_.push_back("Z_ACCELERATION");
 }
 
+// ===================================================================
 template <typename T>
 RosFilter<T>::~RosFilter() {
   topic_subs_.clear();
@@ -118,6 +120,7 @@ RosFilter<T>::~RosFilter() {
   position_pub_.reset();
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::reset() {
   // Get rid of any initial poses (pretend we've never had a measurement)
@@ -147,6 +150,65 @@ void RosFilter<T>::reset() {
   filter_.reset();
 }
 
+// ===================================================================
+template <typename T>
+bool RosFilter<T>::validateMeasurementTime(
+    const std::string& topicName, const builtin_interfaces::msg::Time& stamp) {
+  if (last_set_pose_time_ >= stamp) {
+    std::stringstream stream;
+    stream << "The " << topicName
+           << " message has a timestamp equal to or before the last filter "
+              "reset, this message will be ignored. This may indicate an "
+              "empty or bad timestamp. (message time: "
+           << filter_utilities::toSec(stamp) << ")";
+    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
+                  topicName + "_timestamp", stream.str(), false);
+
+    RF_DEBUG(
+        "Received message that preceded the most recent pose reset. "
+        "Ignoring topic : "
+        << topicName);
+    return false;
+  }
+
+  return true;
+}
+
+// ===================================================================
+template <typename T>
+bool RosFilter<T>::validateMeasurementOrdering(
+    const std::string& topic_name, const builtin_interfaces::msg::Time& stamp) {
+  //  Put the initial value in the lastMessagTimes_ for this variable if it's
+  //  empty
+  if (last_message_times_.count(topic_name) == 0) {
+    last_message_times_.insert(
+        std::pair<std::string, rclcpp::Time>(topic_name, stamp));
+  }
+
+  if (last_message_times_[topic_name] <= stamp) {
+    return true;
+  }
+
+  std::stringstream stream;
+  stream << "The " << topic_name
+         << " message has a timestamp before that of "
+            "the previous message received,"
+         << " this message will be ignored. This may "
+            "indicate a bad timestamp. (message time: "
+         << stamp.nanosec << ")";
+  addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
+                topic_name + "_timestamp", stream.str(), false);
+
+  RF_DEBUG("Message is too old. Last message time for "
+           << topic_name << " is "
+           << filter_utilities::toSec(last_message_times_[topic_name])
+           << ", current message time is " << filter_utilities::toSec(stamp)
+           << ".\n");
+
+  return false;
+}
+
+// ===================================================================
 template <typename T>
 void RosFilter<T>::toggleFilterProcessingCallback(
     const std::shared_ptr<rmw_request_id_t> /*request_header*/,
@@ -171,6 +233,7 @@ void RosFilter<T>::toggleFilterProcessingCallback(
   }
 }
 
+// ===================================================================
 // @todo: Replace with AccelWithCovarianceStamped
 template <typename T>
 void RosFilter<T>::accelerationCallback(
@@ -186,7 +249,6 @@ void RosFilter<T>::accelerationCallback(
 
   RF_DEBUG("------ RosFilter<T>::accelerationCallback (" << topic_name
                                                          << ") ------\n")
-  // "Twist message:\n" << *msg);
 
   if (last_message_times_.count(topic_name) == 0) {
     last_message_times_.insert(
@@ -231,11 +293,6 @@ void RosFilter<T>::accelerationCallback(
              << filter_utilities::toSec(last_message_times_[topic_name])
              << "\n");
   } else {
-    // else if (reset_on_time_jump_ && rclcpp::Time::isSimTime())
-    //{
-    //  reset();
-    //}
-
     std::stringstream stream;
     stream << "The " << topic_name
            << " message has a timestamp before that of "
@@ -258,6 +315,7 @@ void RosFilter<T>::accelerationCallback(
                                                            << ") ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::controlCallback(
     const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -269,6 +327,7 @@ void RosFilter<T>::controlCallback(
   controlStampedCallback(twist_stamped_ptr);
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::controlStampedCallback(
     const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
@@ -285,9 +344,6 @@ void RosFilter<T>::controlStampedCallback(
     // Update the filter with this control term
     filter_.setControl(latest_control_, msg->header.stamp);
   } else {
-    // ROS_WARN_STREAM_THROTTLE(5.0, "Commanded velocities must be given in the
-    // robot's body frame (" << base_link_frame_id_ << "). Message frame was "
-    // << msg->header.frame_id);
     std::cerr
         << "Commanded velocities must be given in the robot's body frame ("
         << base_link_frame_id_ << "). Message frame was "
@@ -295,6 +351,7 @@ void RosFilter<T>::controlStampedCallback(
   }
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::enqueueMeasurement(
     const std::string& topic_name, const Eigen::VectorXd& measurement,
@@ -314,6 +371,7 @@ void RosFilter<T>::enqueueMeasurement(
   measurement_queue_.push(meas);
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::forceTwoD(Eigen::VectorXd& measurement,
                              Eigen::MatrixXd& measurement_covariance,
@@ -343,6 +401,7 @@ void RosFilter<T>::forceTwoD(Eigen::VectorXd& measurement,
   update_vector[StateMemberAz] = 1;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::getFilteredOdometryMessage(
     nav_msgs::msg::Odometry* message) {
@@ -401,6 +460,7 @@ bool RosFilter<T>::getFilteredOdometryMessage(
   return filter_.getInitializedStatus();
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::getFilteredAccelMessage(
     geometry_msgs::msg::AccelWithCovarianceStamped* message) {
@@ -435,6 +495,7 @@ bool RosFilter<T>::getFilteredAccelMessage(
   return filter_.getInitializedStatus();
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg,
                                const std::string& topic_name,
@@ -548,6 +609,7 @@ void RosFilter<T>::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg,
                                                   << ") ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::integrateMeasurements(const rclcpp::Time& current_time) {
   RF_DEBUG(
@@ -583,13 +645,6 @@ void RosFilter<T>::integrateMeasurements(const rclcpp::Time& current_time) {
       if (!revertTo(first_measurement_time - rclcpp::Duration(1ns))) {
         RF_DEBUG("ERROR: history interval is too small to revert to time "
                  << filter_utilities::toSec(first_measurement_time) << "\n");
-        // ROS_WARN_STREAM_DELAYED_THROTTLE(history_length_,
-        //   "Received old measurement for topic " << first_measurement_topic <<
-        //   ", but history interval is insufficiently sized. "
-        //   "Measurement time is " << std::setprecision(20) <<
-        //   first_measurement_time <<
-        //   ", current time is " << current_time <<
-        //   ", history length is " << history_length_ << ".");
         restored_measurement_count = 0;
       }
 
@@ -598,12 +653,18 @@ void RosFilter<T>::integrateMeasurements(const rclcpp::Time& current_time) {
     }
 
     while (!measurement_queue_.empty() && rclcpp::ok()) {
+      RF_DEBUG("Got some measurements\n")
       MeasurementPtr measurement = measurement_queue_.top();
 
       // If we've reached a measurement that has a time later than now, it
       // should wait until a future iteration. Since measurements are stored in
       // a priority queue, all remaining measurements will be in the future.
       if (current_time < measurement->time_) {
+        RCLCPP_FATAL(this->get_logger(),
+                     "Warning: messages came in future. Current time: %li : "
+                     "Message time : %li",
+                     current_time.nanoseconds(),
+                     measurement->time_.nanoseconds());
         break;
       }
 
@@ -623,7 +684,7 @@ void RosFilter<T>::integrateMeasurements(const rclcpp::Time& current_time) {
                            measurement->latest_control_time_);
         restored_measurement_count--;
       }
-
+      RF_DEBUG("About to process\n")
       // This will call predict and, if necessary, correct
       filter_.processMeasurement(*(measurement.get()));
 
@@ -677,6 +738,7 @@ void RosFilter<T>::integrateMeasurements(const rclcpp::Time& current_time) {
   RF_DEBUG("\n----- /RosFilter<T>::integrateMeasurements ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::loadParams() {
   /* For diagnostic purposes, collect information about how many different
@@ -1708,27 +1770,14 @@ void RosFilter<T>::loadParams() {
   }
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::odometryCallback(
     const nav_msgs::msg::Odometry::SharedPtr msg, const std::string& topic_name,
     const CallbackData& pose_callback_data,
     const CallbackData& twist_callback_data) {
-  // If we've just reset the filter, then we want to ignore any messages
-  // that arrive with an older timestamp
-  if (last_set_pose_time_ >= msg->header.stamp) {
-    std::stringstream stream;
-    stream
-        << "The " << topic_name
-        << " message has a timestamp equal to or before the last filter reset, "
-        << "this message will be ignored. This may indicate an empty or bad "
-           "timestamp. (message time: "
-        << filter_utilities::toSec(msg->header.stamp) << ")";
-    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                  topic_name + "_timestamp", stream.str(), false);
-    RF_DEBUG(
-        "Received message that preceded the most recent pose reset. "
-        "Ignoring...");
-
+  // Validate reasonable measurement time and generate debug.
+  if (validateMeasurementTime(topic_name, msg->header.stamp)) {
     return;
   }
 
@@ -1761,6 +1810,7 @@ void RosFilter<T>::odometryCallback(
                                                        << ") ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::poseCallback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg,
@@ -1768,18 +1818,8 @@ void RosFilter<T>::poseCallback(
     const bool imu_data) {
   const std::string& topic_name = callback_data.topic_name_;
 
-  // If we've just reset the filter, then we want to ignore any messages
-  // that arrive with an older timestamp
-  if (last_set_pose_time_ >= msg->header.stamp) {
-    std::stringstream stream;
-    stream
-        << "The " << topic_name
-        << " message has a timestamp equal to or before the last filter reset, "
-        << "this message will be ignored. This may indicate an empty or bad "
-           "timestamp. (message time: "
-        << filter_utilities::toSec(msg->header.stamp) << ")";
-    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                  topic_name + "_timestamp", stream.str(), false);
+  // Validate reasonable measurement time and generate debug.
+  if (validateMeasurementTime(topic_name, msg->header.stamp)) {
     return;
   }
 
@@ -1788,15 +1828,8 @@ void RosFilter<T>::poseCallback(
                                                     "Pose message:\n"
                                                  << msg);
 
-  //  Put the initial value in the lastMessagTimes_ for this variable if it's
-  //  empty
-  if (last_message_times_.count(topic_name) == 0) {
-    last_message_times_.insert(
-        std::pair<std::string, rclcpp::Time>(topic_name, msg->header.stamp));
-  }
-
   // Make sure this message is newer than the last one
-  if (last_message_times_[topic_name] <= msg->header.stamp) {
+  if (validateMeasurementOrdering(topic_name, msg->header.stamp)) {
     RF_DEBUG("Update vector for " << topic_name << " is:\n"
                                   << callback_data.update_vector_);
 
@@ -1830,33 +1863,13 @@ void RosFilter<T>::poseCallback(
              << topic_name << " is now "
              << filter_utilities::toSec(last_message_times_[topic_name])
              << "\n");
-  } else {
-    // else if (reset_on_time_jump_ && rclcpp::Time::isSimTime())
-    //{
-    //  reset();
-    // }
-
-    std::stringstream stream;
-    stream << "The " << topic_name
-           << " message has a timestamp before that of "
-              "the previous message received,"
-           << " this message will be ignored. This may "
-              "indicate a bad timestamp. (message time: "
-           << msg->header.stamp.nanosec << ")";
-    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                  topic_name + "_timestamp", stream.str(), false);
-
-    RF_DEBUG("Message is too old. Last message time for "
-             << topic_name << " is "
-             << filter_utilities::toSec(last_message_times_[topic_name])
-             << ", current message time is "
-             << filter_utilities::toSec(msg->header.stamp) << ".\n");
   }
 
   RF_DEBUG("\n----- /RosFilter<T>::poseCallback (" << topic_name
                                                    << ") ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::initialize() {
   diagnostic_updater_ =
@@ -1907,6 +1920,7 @@ void RosFilter<T>::initialize() {
   this->get_node_timers_interface()->add_timer(timer_, nullptr);
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::periodicUpdate() {
   // Wait for the filter to be enabled
@@ -1916,11 +1930,13 @@ void RosFilter<T>::periodicUpdate() {
                      enable_filter_srv_->get_service_name());
     return;
   }
+  RF_DEBUG("------ RosFilter<T>::periodicUpdate ------\n")
 
   rclcpp::Time cur_time = this->now();
 
   if (toggled_on_) {
     // Now we'll integrate any measurements we've received
+    RF_DEBUG("Inside toggle function \n")
     integrateMeasurements(cur_time);
   } else {
     // Clear out measurements since we're not currently processing new entries
@@ -1936,8 +1952,9 @@ void RosFilter<T>::periodicUpdate() {
   auto filtered_position = std::make_unique<nav_msgs::msg::Odometry>();
 
   bool corrected_data = false;
-
+  RF_DEBUG("Before getting filtered position \n")
   if (getFilteredOdometryMessage(filtered_position.get())) {
+    RF_DEBUG("Inside main loop function \n")
     world_base_link_trans_msg_.header.stamp =
         static_cast<rclcpp::Time>(filtered_position->header.stamp) +
         tf_time_offset_;
@@ -1980,6 +1997,7 @@ void RosFilter<T>::periodicUpdate() {
     // send the transform. If the world_frame_id_ is the map_frame_id_ frame,
     // we'll have some work to do.
     if (publish_transform_ && !corrected_data) {
+      RF_DEBUG("Inside tf publishing \n")
       if (filtered_position->header.frame_id == odom_frame_id_) {
         world_transform_broadcaster_->sendTransform(world_base_link_trans_msg_);
       } else if (filtered_position->header.frame_id == map_frame_id_) {
@@ -2030,6 +2048,7 @@ void RosFilter<T>::periodicUpdate() {
 
           world_transform_broadcaster_->sendTransform(map_odom_trans_msg);
         } catch (...) {
+          RF_DEBUG("Efk fould not get odom to baselink ids \n")
           // ROS_ERROR_STREAM_DELAYED_THROTTLE(5.0, "Could not obtain
           // transform from "
           //                                  << odom_frame_id_ << "->" <<
@@ -2048,6 +2067,7 @@ void RosFilter<T>::periodicUpdate() {
 
     // Fire off the position and the transform
     if (!corrected_data) {
+      RF_DEBUG("Inside publisher \n")
       position_pub_->publish(std::move(filtered_position));
     }
 
@@ -2093,13 +2113,12 @@ void RosFilter<T>::periodicUpdate() {
   }
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::setPoseCallback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
   RF_DEBUG("------ RosFilter<T>::setPoseCallback ------\nPose message:\n"
            << msg);
-
-  // ROS_INFO_STREAM("Received set_pose request with value\n" << *msg);
 
   std::string topic_name("set_pose");
 
@@ -2143,6 +2162,7 @@ void RosFilter<T>::setPoseCallback(
   RF_DEBUG("\n------ /RosFilter<T>::setPoseCallback ------\n");
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::setPoseSrvCallback(
     const std::shared_ptr<rmw_request_id_t> /*request_header*/,
@@ -2156,6 +2176,7 @@ bool RosFilter<T>::setPoseSrvCallback(
   return true;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::enableFilterSrvCallback(
     const std::shared_ptr<rmw_request_id_t>,
@@ -2178,24 +2199,15 @@ bool RosFilter<T>::enableFilterSrvCallback(
   return true;
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::twistCallback(
     const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
     const CallbackData& callback_data, const std::string& target_frame) {
   const std::string& topic_name = callback_data.topic_name_;
 
-  // If we've just reset the filter, then we want to ignore any messages
-  // that arrive with an older timestamp
-  if (last_set_pose_time_ >= msg->header.stamp) {
-    std::stringstream stream;
-    stream
-        << "The " << topic_name
-        << " message has a timestamp equal to or before the last filter reset, "
-        << "this message will be ignored. This may indicate an empty or bad "
-           "timestamp. (message time: "
-        << filter_utilities::toSec(msg->header.stamp) << ")";
-    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                  topic_name + "_timestamp", stream.str(), false);
+  // Validate reasonable measurement time and generate debug.
+  if (validateMeasurementTime(topic_name, msg->header.stamp)) {
     return;
   }
 
@@ -2204,13 +2216,8 @@ void RosFilter<T>::twistCallback(
                                                      "Twist message:\n"
                                                   << msg);
 
-  if (last_message_times_.count(topic_name) == 0) {
-    last_message_times_.insert(
-        std::pair<std::string, rclcpp::Time>(topic_name, msg->header.stamp));
-  }
-
   // Make sure this message is newer than the last one
-  if (last_message_times_[topic_name] <= msg->header.stamp) {
+  if (validateMeasurementOrdering(topic_name, msg->header.stamp)) {
     RF_DEBUG("Update vector for " << topic_name << " is:\n"
                                   << callback_data.update_vector_);
 
@@ -2244,28 +2251,13 @@ void RosFilter<T>::twistCallback(
              << topic_name << " is now "
              << filter_utilities::toSec(last_message_times_[topic_name])
              << "\n");
-  } else {
-    std::stringstream stream;
-    stream << "The " << topic_name
-           << " message has a timestamp before that of "
-              "the previous message received,"
-           << " this message will be ignored. This may "
-              "indicate a bad timestamp. (message time: "
-           << msg->header.stamp.nanosec << ")";
-    addDiagnostic(diagnostic_msgs::msg::DiagnosticStatus::WARN,
-                  topic_name + "_timestamp", stream.str(), false);
-
-    RF_DEBUG("Message is too old. Last message time for "
-             << topic_name << " is"
-             << filter_utilities::toSec(last_message_times_[topic_name])
-             << ", current message time is "
-             << filter_utilities::toSec(msg->header.stamp) << ".\n");
   }
 
   RF_DEBUG("\n----- /RosFilter<T>::twistCallback (" << topic_name
                                                     << ") ------\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::addDiagnostic(const int errLevel,
                                  const std::string& topicAndClass,
@@ -2280,6 +2272,7 @@ void RosFilter<T>::addDiagnostic(const int errLevel,
   }
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::aggregateDiagnostics(
     diagnostic_updater::DiagnosticStatusWrapper& wrapper) {
@@ -2334,6 +2327,7 @@ void RosFilter<T>::aggregateDiagnostics(
   dynamic_diag_error_level_ = diagnostic_msgs::msg::DiagnosticStatus::OK;
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::copyCovariance(const double* arr,
                                   Eigen::MatrixXd& covariance,
@@ -2393,6 +2387,7 @@ void RosFilter<T>::copyCovariance(const double* arr,
   }
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::copyCovariance(const Eigen::MatrixXd& covariance,
                                   double* arr, const size_t dimension) {
@@ -2403,6 +2398,7 @@ void RosFilter<T>::copyCovariance(const Eigen::MatrixXd& covariance,
   }
 }
 
+// ===================================================================
 template <typename T>
 std::vector<bool> RosFilter<T>::loadUpdateConfig(
     const std::string& topic_name) {
@@ -2414,6 +2410,7 @@ std::vector<bool> RosFilter<T>::loadUpdateConfig(
   return update_vector;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::prepareAcceleration(
     const sensor_msgs::msg::Imu::SharedPtr msg, const std::string& topic_name,
@@ -2582,6 +2579,7 @@ bool RosFilter<T>::prepareAcceleration(
   return can_transform;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::preparePose(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg,
@@ -2987,6 +2985,7 @@ bool RosFilter<T>::preparePose(
   return retVal;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::prepareTwist(
     const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
@@ -3137,6 +3136,7 @@ bool RosFilter<T>::prepareTwist(
   return can_transform;
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::saveFilterState(T& filter) {
   FilterStatePtr state = FilterStatePtr(new FilterState());
@@ -3154,13 +3154,12 @@ void RosFilter<T>::saveFilterState(T& filter) {
            << " measurements are in the queue.\n");
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::revertTo(const rclcpp::Time& time) {
   RF_DEBUG("\n----- RosFilter<T>::revertTo -----\n");
   RF_DEBUG("\nRequested time was " << std::setprecision(20)
                                    << filter_utilities::toSec(time) << "\n")
-
-  // size_t history_size = filter_state_history_.size();
 
   // Walk back through the queue until we reach a filter state whose time stamp
   // is less than or equal to the requested time. Since every saved state after
@@ -3189,12 +3188,6 @@ bool RosFilter<T>::revertTo(const rclcpp::Time& time) {
           "Will revert to oldest state at "
           << filter_utilities::toSec(last_history_state->latest_control_time_)
           << ".\n");
-
-      // ROS_WARN_STREAM_DELAYED_THROTTLE(history_length_, "Could not revert "
-      //   "to state with time " << std::setprecision(20) << time <<
-      //   ". Instead reverted to state with time " <<
-      //   lastHistoryState->lastMeasurementTime_ << ". History size was " <<
-      //   history_size);
     }
   }
 
@@ -3233,6 +3226,7 @@ bool RosFilter<T>::revertTo(const rclcpp::Time& time) {
   return ret_val;
 }
 
+// ===================================================================
 template <typename T>
 bool RosFilter<T>::validateFilterOutput(nav_msgs::msg::Odometry* message) {
   return !std::isnan(message->pose.pose.position.x) &&
@@ -3263,6 +3257,7 @@ bool RosFilter<T>::validateFilterOutput(nav_msgs::msg::Odometry* message) {
          !std::isinf(message->twist.twist.angular.z);
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::clearExpiredHistory(const rclcpp::Time cutoff_time) {
   RF_DEBUG("\n----- RosFilter<T>::clearExpiredHistory -----"
@@ -3290,6 +3285,7 @@ void RosFilter<T>::clearExpiredHistory(const rclcpp::Time cutoff_time) {
                        << "\n---- /RosFilter<T>::clearExpiredHistory ----\n");
 }
 
+// ===================================================================
 template <typename T>
 void RosFilter<T>::clearMeasurementQueue() {
   // Clear the measurement queue.
